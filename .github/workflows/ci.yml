@@ -1,24 +1,269 @@
-name: Build
+name: CI/CD
 
 on:
   push:
-    branches: [ main ]
+    branches: [ main, develop ]
   pull_request:
     branches: [ main ]
+  release:
+    types: [ published ]
 
 jobs:
-  build:
+  test:
+    name: Test and Build
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     steps:
-    - uses: actions/checkout@v4
-    
+    - name: Checkout code
+      uses: actions/checkout@v4
+
     - name: Set up Go
       uses: actions/setup-go@v4
       with:
         go-version: '1.23'
-    
-    - name: Build
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests with coverage
+      run: |
+        go test -v -race -coverprofile=coverage.out -timeout=5m ./...
+        go tool cover -func=coverage.out
+        go tool cover -html=coverage.out -o coverage.html
+      shell: bash
+      timeout-minutes: 15
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+      continue-on-error: true
+
+    - name: Run benchmarks
       run: |
         echo "Current directory: $(pwd)"
+        echo "Listing files:"
         ls -la
-        go build -o go-get-imgs ./cmd/go-get-imgs
+        echo "Running benchmarks from tests directory..."
+        go test -bench=. -benchmem ./tests/...
+      timeout-minutes: 5
+      working-directory: ${{ github.workspace }}
+      shell: bash
+
+    - name: Build for current platform
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "Listing files:"
+        ls -la
+        echo "Checking if cmd directory exists:"
+        ls -la cmd/ || echo "cmd directory not found"
+        echo "Checking if cmd/go-get-imgs directory exists:"
+        ls -la cmd/go-get-imgs/ || echo "cmd/go-get-imgs directory not found"
+        mkdir -p build
+        go build -o build/go-get-imgs ./cmd/go-get-imgs
+      timeout-minutes: 5
+      working-directory: ${{ github.workspace }}
+
+    - name: Build for all platforms
+      run: |
+        mkdir -p build
+        
+        # Build for all supported platforms
+        GOOS=darwin GOARCH=amd64 go build -o build/go-get-imgs-darwin-amd64 ./cmd/go-get-imgs
+        GOOS=darwin GOARCH=arm64 go build -o build/go-get-imgs-darwin-arm64 ./cmd/go-get-imgs
+        GOOS=linux GOARCH=amd64 go build -o build/go-get-imgs-linux-amd64 ./cmd/go-get-imgs
+        GOOS=linux GOARCH=arm64 go build -o build/go-get-imgs-linux-arm64 ./cmd/go-get-imgs
+        GOOS=windows GOARCH=amd64 go build -o build/go-get-imgs-windows-amd64.exe ./cmd/go-get-imgs
+        GOOS=windows GOARCH=arm64 go build -o build/go-get-imgs-windows-arm64.exe ./cmd/go-get-imgs
+      timeout-minutes: 10
+      working-directory: ${{ github.workspace }}
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: builds
+        path: build/
+        retention-days: 30
+
+  lint:
+    name: Lint and Security Check
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Install golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: latest
+
+    - name: Run golangci-lint
+      run: golangci-lint run
+      timeout-minutes: 10
+
+    - name: Install gosec (optional)
+      run: |
+        # Try to install gosec, but don't fail if it doesn't work
+        go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest || echo "gosec installation failed, skipping security checks"
+      continue-on-error: true
+      timeout-minutes: 5
+
+    - name: Run security checks
+      run: |
+        # Only run gosec if it was installed successfully
+        if command -v gosec >/dev/null 2>&1; then
+          echo "Running gosec security checks..."
+          gosec ./...
+        else
+          echo "gosec not available, skipping security checks"
+        fi
+      continue-on-error: true
+      timeout-minutes: 5
+
+    - name: Format check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Code is not formatted. Run 'go fmt ./...'"
+          gofmt -s -l .
+          exit 1
+        fi
+
+    - name: Vet check
+      run: go vet ./...
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Run integration tests
+      run: go test -v -run TestIntegration -timeout=10m ./...
+      timeout-minutes: 15
+
+  build-release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    timeout-minutes: 30
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build for all platforms
+      run: |
+        mkdir -p build
+        
+        # Build for all supported platforms
+        GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-darwin-amd64 ./cmd/go-get-imgs
+        GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-darwin-arm64 ./cmd/go-get-imgs
+        GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-linux-amd64 ./cmd/go-get-imgs
+        GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-linux-arm64 ./cmd/go-get-imgs
+        GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-windows-amd64.exe ./cmd/go-get-imgs
+        GOOS=windows GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-windows-arm64.exe ./cmd/go-get-imgs
+      timeout-minutes: 15
+
+    - name: Create distribution packages
+      run: |
+        mkdir -p dist
+        
+        # Create tar.gz packages for Unix systems
+        cd build
+        tar -czf ../dist/go-get-imgs-darwin-amd64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-darwin-amd64
+        tar -czf ../dist/go-get-imgs-darwin-arm64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-darwin-arm64
+        tar -czf ../dist/go-get-imgs-linux-amd64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-linux-amd64
+        tar -czf ../dist/go-get-imgs-linux-arm64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-linux-arm64
+        
+        # Create zip packages for Windows
+        zip ../dist/go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip go-get-imgs-windows-amd64.exe
+        zip ../dist/go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip go-get-imgs-windows-arm64.exe
+      timeout-minutes: 10
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-darwin-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-darwin-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (darwin-arm64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-darwin-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-darwin-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (linux-amd64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-linux-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-linux-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (linux-arm64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-linux-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-linux-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (windows-amd64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip
+        asset_name: go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip
+        asset_content_type: application/zip
+
+    - name: Upload release assets (windows-arm64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip
+        asset_name: go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip
+        asset_content_type: application/zip 
