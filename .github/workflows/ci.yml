@@ -72,9 +72,15 @@ jobs:
       continue-on-error: true
 
     - name: Run benchmarks
-      run: go test -bench=. -benchmem ./...
+      run: |
+        echo "Current directory: $(pwd)"
+        echo "Listing files:"
+        ls -la
+        echo "Running benchmarks from tests directory..."
+        go test -bench=. -benchmem ./tests/...
       timeout-minutes: 5
       working-directory: ${{ github.workspace }}
+      shell: bash
 
     - name: Build for current platform
       run: |
