@@ -56,6 +56,13 @@ jobs:
 
     - name: Build for current platform
       run: |
+        echo "Current directory: $(pwd)"
+        echo "Listing files:"
+        ls -la
+        echo "Checking if cmd directory exists:"
+        ls -la cmd/ || echo "cmd directory not found"
+        echo "Checking if cmd/go-get-imgs directory exists:"
+        ls -la cmd/go-get-imgs/ || echo "cmd/go-get-imgs directory not found"
         mkdir -p build
         go build -o build/go-get-imgs ./cmd/go-get-imgs
       timeout-minutes: 5
