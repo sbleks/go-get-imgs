@@ -66,7 +66,6 @@ jobs:
         mkdir -p build
         go build -o build/go-get-imgs ./cmd/go-get-imgs
       timeout-minutes: 5
-      working-directory: ${{ github.workspace }}
 
     - name: Build for all platforms
       run: |
@@ -80,7 +79,6 @@ jobs:
         GOOS=windows GOARCH=amd64 go build -o build/go-get-imgs-windows-amd64.exe ./cmd/go-get-imgs
         GOOS=windows GOARCH=arm64 go build -o build/go-get-imgs-windows-arm64.exe ./cmd/go-get-imgs
       timeout-minutes: 10
-      working-directory: ${{ github.workspace }}
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
