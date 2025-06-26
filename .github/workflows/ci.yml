@@ -1,0 +1,260 @@
+name: Cross-Platform CI/CD
+
+on:
+  push:
+    branches: [ main, develop ]
+  pull_request:
+    branches: [ main ]
+  release:
+    types: [ published ]
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }} (${{ matrix.arch }})
+    runs-on: ${{ matrix.os }}
+    strategy:
+      matrix:
+        include:
+          - os: ubuntu-latest
+            arch: amd64
+            goos: linux
+            goarch: amd64
+          - os: ubuntu-latest
+            arch: arm64
+            goos: linux
+            goarch: arm64
+          - os: macos-latest
+            arch: amd64
+            goos: darwin
+            goarch: amd64
+          - os: macos-latest
+            arch: arm64
+            goos: darwin
+            goarch: arm64
+          - os: windows-latest
+            arch: amd64
+            goos: windows
+            goarch: amd64
+          - os: windows-latest
+            arch: arm64
+            goos: windows
+            goarch: arm64
+
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Install dependencies
+      run: go mod download
+
+    - name: Run tests
+      run: go test -v -race -cover -timeout=5m
+
+    - name: Run tests with coverage
+      run: |
+        go test -v -race -coverprofile=coverage.out -timeout=5m
+        go tool cover -func=coverage.out
+        go tool cover -html=coverage.out -o coverage.html
+
+    - name: Upload coverage report
+      uses: codecov/codecov-action@v3
+      with:
+        file: ./coverage.out
+        flags: unittests
+        name: codecov-umbrella
+        fail_ci_if_error: false
+
+    - name: Run benchmarks
+      run: go test -bench=. -benchmem
+
+    - name: Build for current platform
+      run: |
+        mkdir -p build
+        go build -o build/go-get-imgs${{ matrix.goos == 'windows' && '.exe' || '' }} main.go
+
+    - name: Build for all platforms
+      run: |
+        mkdir -p build
+        
+        # Build for all supported platforms
+        GOOS=darwin GOARCH=amd64 go build -o build/go-get-imgs-darwin-amd64 main.go
+        GOOS=darwin GOARCH=arm64 go build -o build/go-get-imgs-darwin-arm64 main.go
+        GOOS=linux GOARCH=amd64 go build -o build/go-get-imgs-linux-amd64 main.go
+        GOOS=linux GOARCH=arm64 go build -o build/go-get-imgs-linux-arm64 main.go
+        GOOS=windows GOARCH=amd64 go build -o build/go-get-imgs-windows-amd64.exe main.go
+        GOOS=windows GOARCH=arm64 go build -o build/go-get-imgs-windows-arm64.exe main.go
+
+    - name: Upload build artifacts
+      uses: actions/upload-artifact@v4
+      with:
+        name: builds-${{ matrix.os }}-${{ matrix.arch }}
+        path: build/
+        retention-days: 30
+
+  lint:
+    name: Lint and Security Check
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Install golangci-lint
+      uses: golangci/golangci-lint-action@v4
+      with:
+        version: latest
+
+    - name: Run golangci-lint
+      run: golangci-lint run
+
+    - name: Install gosec
+      run: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
+
+    - name: Run security checks
+      run: gosec ./...
+
+    - name: Format check
+      run: |
+        if [ "$(gofmt -s -l . | wc -l)" -gt 0 ]; then
+          echo "Code is not formatted. Run 'go fmt ./...'"
+          gofmt -s -l .
+          exit 1
+        fi
+
+    - name: Vet check
+      run: go vet ./...
+
+  integration-test:
+    name: Integration Tests
+    runs-on: ubuntu-latest
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Run integration tests
+      run: go test -v -run TestIntegration -timeout=10m
+
+    - name: Run cross-platform tests
+      run: go test -v -run TestCrossPlatform -timeout=5m
+
+  build-release:
+    name: Build Release
+    runs-on: ubuntu-latest
+    if: github.event_name == 'release'
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v4
+
+    - name: Set up Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.23'
+        cache: true
+
+    - name: Get version
+      id: version
+      run: echo "version=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+    - name: Build for all platforms
+      run: |
+        mkdir -p build
+        
+        # Build for all supported platforms
+        GOOS=darwin GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-darwin-amd64 main.go
+        GOOS=darwin GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-darwin-arm64 main.go
+        GOOS=linux GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-linux-amd64 main.go
+        GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-linux-arm64 main.go
+        GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-windows-amd64.exe main.go
+        GOOS=windows GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-windows-arm64.exe main.go
+
+    - name: Create distribution packages
+      run: |
+        mkdir -p dist
+        
+        # Create tar.gz packages for Unix systems
+        cd build
+        tar -czf ../dist/go-get-imgs-darwin-amd64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-darwin-amd64
+        tar -czf ../dist/go-get-imgs-darwin-arm64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-darwin-arm64
+        tar -czf ../dist/go-get-imgs-linux-amd64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-linux-amd64
+        tar -czf ../dist/go-get-imgs-linux-arm64-${{ steps.version.outputs.version }}.tar.gz go-get-imgs-linux-arm64
+        
+        # Create zip packages for Windows
+        zip ../dist/go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip go-get-imgs-windows-amd64.exe
+        zip ../dist/go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip go-get-imgs-windows-arm64.exe
+
+    - name: Upload release assets
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-darwin-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-darwin-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (darwin-arm64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-darwin-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-darwin-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (linux-amd64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-linux-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-linux-amd64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (linux-arm64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-linux-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_name: go-get-imgs-linux-arm64-${{ steps.version.outputs.version }}.tar.gz
+        asset_content_type: application/gzip
+
+    - name: Upload release assets (windows-amd64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip
+        asset_name: go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip
+        asset_content_type: application/zip
+
+    - name: Upload release assets (windows-arm64)
+      uses: actions/upload-release-asset@v1
+      env:
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      with:
+        upload_url: ${{ github.event.release.upload_url }}
+        asset_path: ./dist/go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip
+        asset_name: go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip
+        asset_content_type: application/zip 

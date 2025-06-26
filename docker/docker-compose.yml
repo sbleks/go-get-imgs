@@ -1,0 +1,87 @@
+version: '3.8'
+
+services:
+  # Build service for cross-platform builds
+  builder:
+    build:
+      context: .
+      target: builder
+    volumes:
+      - ./build:/app/build
+      - ./dist:/app/dist
+    command: >
+      sh -c "
+        mkdir -p build dist &&
+        cp go-get-imgs-* build/ &&
+        cd build &&
+        tar -czf ../dist/go-get-imgs-linux-amd64.tar.gz go-get-imgs-linux-amd64 &&
+        tar -czf ../dist/go-get-imgs-linux-arm64.tar.gz go-get-imgs-linux-arm64 &&
+        tar -czf ../dist/go-get-imgs-darwin-amd64.tar.gz go-get-imgs-darwin-amd64 &&
+        tar -czf ../dist/go-get-imgs-darwin-arm64.tar.gz go-get-imgs-darwin-arm64 &&
+        echo 'Build artifacts created in build/ and dist/ directories'
+      "
+
+  # Test service for running all tests
+  tester:
+    build:
+      context: .
+      target: tester
+    volumes:
+      - ./test-results:/app/test-results
+    command: >
+      sh -c "
+        mkdir -p test-results &&
+        go test -v -race -cover -coverprofile=test-results/coverage.out > test-results/test-output.txt 2>&1 &&
+        go test -v -run TestIntegration > test-results/integration-output.txt 2>&1 &&
+        go test -v -run TestCrossPlatform > test-results/cross-platform-output.txt 2>&1 &&
+        go test -bench=. -benchmem > test-results/benchmark-output.txt 2>&1 &&
+        echo 'Test results saved to test-results/ directory'
+      "
+
+  # Runtime service for testing the application
+  runtime:
+    build:
+      context: .
+      target: runtime
+    volumes:
+      - ./downloads:/root/downloads
+      - ./sample.csv:/root/sample.csv
+    environment:
+      - TZ=UTC
+    command: ["./go-get-imgs-linux-amd64", "sample.csv", "3"]
+
+  # Development service for interactive development
+  dev:
+    build:
+      context: .
+      target: tester
+    volumes:
+      - .:/app
+      - ./downloads:/app/downloads
+    working_dir: /app
+    command: >
+      sh -c "
+        go mod download &&
+        echo 'Development environment ready. Run: go run main.go sample.csv 3'
+      "
+    stdin_open: true
+    tty: true
+
+  # Cross-platform test service
+  cross-platform-test:
+    build:
+      context: .
+      target: tester
+    volumes:
+      - ./test-results:/app/test-results
+    command: >
+      sh -c "
+        mkdir -p test-results &&
+        echo 'Testing on Linux (Alpine)' &&
+        go test -v -run TestCrossPlatform > test-results/cross-platform-linux.txt 2>&1 &&
+        echo 'Cross-platform tests completed'
+      "
+
+networks:
+  default:
+    name: go-get-imgs-network 
