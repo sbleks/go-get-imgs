@@ -12,6 +12,7 @@ jobs:
   test:
     name: Test on ${{ matrix.os }} (${{ matrix.arch }})
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 30
     strategy:
       matrix:
         include:
@@ -53,14 +54,13 @@ jobs:
     - name: Install dependencies
       run: go mod download
 
-    - name: Run tests
-      run: go test -v -race -cover -timeout=5m ./...
-
     - name: Run tests with coverage
       run: |
         go test -v -race -coverprofile=coverage.out -timeout=5m ./...
         go tool cover -func=coverage.out
         go tool cover -html=coverage.out -o coverage.html
+      shell: bash
+      timeout-minutes: 15
 
     - name: Upload coverage report
       uses: codecov/codecov-action@v3
@@ -72,11 +72,13 @@ jobs:
 
     - name: Run benchmarks
       run: go test -bench=. -benchmem ./...
+      timeout-minutes: 5
 
     - name: Build for current platform
       run: |
         mkdir -p build
         go build -o build/go-get-imgs${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/go-get-imgs
+      timeout-minutes: 5
 
     - name: Build for all platforms
       run: |
@@ -89,6 +91,7 @@ jobs:
         GOOS=linux GOARCH=arm64 go build -o build/go-get-imgs-linux-arm64 ./cmd/go-get-imgs
         GOOS=windows GOARCH=amd64 go build -o build/go-get-imgs-windows-amd64.exe ./cmd/go-get-imgs
         GOOS=windows GOARCH=arm64 go build -o build/go-get-imgs-windows-arm64.exe ./cmd/go-get-imgs
+      timeout-minutes: 10
 
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
@@ -100,6 +103,7 @@ jobs:
   lint:
     name: Lint and Security Check
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -117,12 +121,14 @@ jobs:
 
     - name: Run golangci-lint
       run: golangci-lint run
+      timeout-minutes: 10
 
     - name: Install gosec
       run: go install github.com/securecodewarrior/gosec/v2/cmd/gosec@latest
 
     - name: Run security checks
       run: gosec ./...
+      timeout-minutes: 5
 
     - name: Format check
       run: |
@@ -138,6 +144,7 @@ jobs:
   integration-test:
     name: Integration Tests
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -150,14 +157,17 @@ jobs:
 
     - name: Run integration tests
       run: go test -v -run TestIntegration -timeout=10m ./...
+      timeout-minutes: 15
 
     - name: Run cross-platform tests
       run: go test -v -run TestCrossPlatform -timeout=5m ./...
+      timeout-minutes: 10
 
   build-release:
     name: Build Release
     runs-on: ubuntu-latest
     if: github.event_name == 'release'
+    timeout-minutes: 30
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -183,6 +193,7 @@ jobs:
         GOOS=linux GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-linux-arm64 ./cmd/go-get-imgs
         GOOS=windows GOARCH=amd64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-windows-amd64.exe ./cmd/go-get-imgs
         GOOS=windows GOARCH=arm64 go build -ldflags "-X main.Version=${{ steps.version.outputs.version }}" -o build/go-get-imgs-windows-arm64.exe ./cmd/go-get-imgs
+      timeout-minutes: 15
 
     - name: Create distribution packages
       run: |
@@ -198,6 +209,7 @@ jobs:
         # Create zip packages for Windows
         zip ../dist/go-get-imgs-windows-amd64-${{ steps.version.outputs.version }}.zip go-get-imgs-windows-amd64.exe
         zip ../dist/go-get-imgs-windows-arm64-${{ steps.version.outputs.version }}.zip go-get-imgs-windows-arm64.exe
+      timeout-minutes: 10
 
     - name: Upload release assets
       uses: actions/upload-release-asset@v1

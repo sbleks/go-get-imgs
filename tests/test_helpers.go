@@ -54,7 +54,9 @@ func (th *TestHelper) CreateTestServerWithImages() *httptest.Server {
 		default:
 			w.Header().Set("Content-Type", "image/jpeg")
 		}
-		w.Write([]byte(fmt.Sprintf("fake image data %d", imageCounter)))
+		if _, err := w.Write([]byte(fmt.Sprintf("fake image data %d", imageCounter))); err != nil {
+			th.t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	return server
 }
@@ -171,14 +173,18 @@ func (th *TestHelper) CreateMockImageServer(behaviors map[int]MockBehavior) *htt
 		if !exists {
 			// Default behavior
 			w.Header().Set("Content-Type", "image/jpeg")
-			w.Write([]byte("default image data"))
+			if _, err := w.Write([]byte("default image data")); err != nil {
+				th.t.Errorf("Failed to write response: %v", err)
+			}
 			return
 		}
 
 		switch behavior.Type {
 		case "success":
 			w.Header().Set("Content-Type", behavior.ContentType)
-			w.Write([]byte(behavior.Data))
+			if _, err := w.Write([]byte(behavior.Data)); err != nil {
+				th.t.Errorf("Failed to write response: %v", err)
+			}
 		case "error":
 			w.WriteHeader(behavior.StatusCode)
 		case "timeout":

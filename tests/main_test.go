@@ -19,7 +19,9 @@ import (
 // TestMain sets up and tears down test environment
 func TestMain(m *testing.M) {
 	// Create test downloads directory
-	os.MkdirAll("test_downloads", 0755)
+	if err := os.MkdirAll("test_downloads", 0755); err != nil {
+		panic(fmt.Sprintf("Failed to create test_downloads directory: %v", err))
+	}
 
 	// Run tests
 	code := m.Run()
@@ -35,7 +37,9 @@ func TestDownloadImage(t *testing.T) {
 	// Create a test server that serves a simple image
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("fake image data"))
+		if _, err := w.Write([]byte("fake image data")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -69,7 +73,9 @@ func TestDownloadImage(t *testing.T) {
 	for i, tc := range testCases {
 		server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Content-Type", tc.contentType)
-			w.Write([]byte("fake image data"))
+			if _, err := w.Write([]byte("fake image data")); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		}))
 
 		err := d.DownloadImage(server.URL, "test_downloads", i+100)
@@ -110,7 +116,9 @@ func TestDownloadImageErrors(t *testing.T) {
 	slowServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		// Simulate slow response
 		time.Sleep(35 * time.Second)
-		w.Write([]byte("too late"))
+		if _, err := w.Write([]byte("too late")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer slowServer.Close()
 
@@ -300,7 +308,9 @@ func TestFileOperations(t *testing.T) {
 func BenchmarkDownloadImage(b *testing.B) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("benchmark image data"))
+		if _, err := w.Write([]byte("benchmark image data")); err != nil {
+			b.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -308,7 +318,9 @@ func BenchmarkDownloadImage(b *testing.B) {
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
-		d.DownloadImage(server.URL, "test_downloads", i)
+		if err := d.DownloadImage(server.URL, "test_downloads", i); err != nil {
+			b.Errorf("Download failed: %v", err)
+		}
 	}
 }
 

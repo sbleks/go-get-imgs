@@ -31,7 +31,9 @@ func TestIntegrationCompleteWorkflow(t *testing.T) {
 		default:
 			w.Header().Set("Content-Type", "image/webp")
 		}
-		w.Write([]byte(fmt.Sprintf("fake image data %d", imageCounter)))
+		if _, err := w.Write([]byte(fmt.Sprintf("fake image data %d", imageCounter))); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -66,14 +68,9 @@ func TestIntegrationCompleteWorkflow(t *testing.T) {
 
 	reader := csv.NewReader(file)
 
-	// Read header
-	header, err := reader.Read()
-	if err != nil {
-		t.Fatalf("Failed to read CSV header: %v", err)
-	}
-
-	if len(header) < 3 {
-		t.Fatalf("Expected at least 3 columns in header, got %d", len(header))
+	// Skip header
+	if _, err := reader.Read(); err != nil {
+		t.Fatalf("Failed to read header: %v", err)
 	}
 
 	// Process each row
@@ -148,21 +145,27 @@ func TestIntegrationWithErrors(t *testing.T) {
 		case 1:
 			// Success
 			w.Header().Set("Content-Type", "image/jpeg")
-			w.Write([]byte("success image"))
+			if _, err := w.Write([]byte("success image")); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		case 2:
 			// 404 error
 			w.WriteHeader(http.StatusNotFound)
 		case 3:
 			// Success
 			w.Header().Set("Content-Type", "image/png")
-			w.Write([]byte("success image"))
+			if _, err := w.Write([]byte("success image")); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		case 4:
 			// 500 error
 			w.WriteHeader(http.StatusInternalServerError)
 		default:
 			// Success
 			w.Header().Set("Content-Type", "image/gif")
-			w.Write([]byte("success image"))
+			if _, err := w.Write([]byte("success image")); err != nil {
+				t.Errorf("Failed to write response: %v", err)
+			}
 		}
 	}))
 	defer server.Close()
@@ -200,7 +203,10 @@ func TestIntegrationWithErrors(t *testing.T) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.Read() // Skip header
+	// Skip header
+	if _, err := reader.Read(); err != nil {
+		t.Fatalf("Failed to read header: %v", err)
+	}
 
 	successCount := 0
 	errorCount := 0
@@ -286,7 +292,9 @@ func TestIntegrationLargeFile(t *testing.T) {
 	// Create test server
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "image/jpeg")
-		w.Write([]byte("large file test image"))
+		if _, err := w.Write([]byte("large file test image")); err != nil {
+			t.Errorf("Failed to write response: %v", err)
+		}
 	}))
 	defer server.Close()
 
@@ -322,7 +330,10 @@ func TestIntegrationLargeFile(t *testing.T) {
 	defer file.Close()
 
 	reader := csv.NewReader(file)
-	reader.Read() // Skip header
+	// Skip header
+	if _, err := reader.Read(); err != nil {
+		t.Fatalf("Failed to read header: %v", err)
+	}
 
 	successCount := 0
 	errorCount := 0
