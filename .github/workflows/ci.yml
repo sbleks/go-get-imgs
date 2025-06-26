@@ -18,10 +18,7 @@ jobs:
         go-version: '1.23'
     
     - name: Build
-      run: go build -o go-get-imgs ./cmd/go-get-imgs
-    
-    - name: Upload artifact
-      uses: actions/upload-artifact@v4
-      with:
-        name: go-get-imgs
-        path: go-get-imgs 
+      run: |
+        echo "Current directory: $(pwd)"
+        ls -la
+        go build -o go-get-imgs ./cmd/go-get-imgs
