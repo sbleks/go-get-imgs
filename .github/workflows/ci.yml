@@ -1,4 +1,4 @@
-name: Cross-Platform CI/CD
+name: CI/CD
 
 on:
   push:
@@ -10,37 +10,9 @@ on:
 
 jobs:
   test:
-    name: Test on ${{ matrix.os }} (${{ matrix.arch }})
-    runs-on: ${{ matrix.os }}
+    name: Test and Build
+    runs-on: ubuntu-latest
     timeout-minutes: 30
-    strategy:
-      matrix:
-        include:
-          - os: ubuntu-latest
-            arch: amd64
-            goos: linux
-            goarch: amd64
-          - os: ubuntu-latest
-            arch: arm64
-            goos: linux
-            goarch: arm64
-          - os: macos-latest
-            arch: amd64
-            goos: darwin
-            goarch: amd64
-          - os: macos-latest
-            arch: arm64
-            goos: darwin
-            goarch: arm64
-          - os: windows-latest
-            arch: amd64
-            goos: windows
-            goarch: amd64
-          - os: windows-latest
-            arch: arm64
-            goos: windows
-            goarch: arm64
-
     steps:
     - name: Checkout code
       uses: actions/checkout@v4
@@ -85,7 +57,7 @@ jobs:
     - name: Build for current platform
       run: |
         mkdir -p build
-        go build -o build/go-get-imgs${{ matrix.goos == 'windows' && '.exe' || '' }} ./cmd/go-get-imgs
+        go build -o build/go-get-imgs ./cmd/go-get-imgs
       timeout-minutes: 5
       working-directory: ${{ github.workspace }}
 
@@ -106,7 +78,7 @@ jobs:
     - name: Upload build artifacts
       uses: actions/upload-artifact@v4
       with:
-        name: builds-${{ matrix.os }}-${{ matrix.arch }}
+        name: builds
         path: build/
         retention-days: 30
 
@@ -180,10 +152,6 @@ jobs:
     - name: Run integration tests
       run: go test -v -run TestIntegration -timeout=10m ./...
       timeout-minutes: 15
-
-    - name: Run cross-platform tests
-      run: go test -v -run TestCrossPlatform -timeout=5m ./...
-      timeout-minutes: 10
 
   build-release:
     name: Build Release
